@@ -1,0 +1,17 @@
+# Test backend: JFrog Container Registry (free edition, supports Docker remote repos).
+artifactory:
+  nginx:
+    enabled: true
+    https:
+      enabled: false
+    service:
+      type: ClusterIP
+  postgresql:
+    enabled: true
+    auth:
+      password: jcr-test-pg
+  artifactory:
+    persistence:
+      size: 20Gi
+    masterKeySecretName: jcr-keys
+    joinKeySecretName: jcr-keys

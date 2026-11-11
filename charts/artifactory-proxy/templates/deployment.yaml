@@ -1,0 +1,160 @@
+{{- if .Values.nginx.enabled }}
+{{- $n := .Values.nginx }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ap.fullname" . }}
+  labels:
+    {{- include "ap.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $n.replicas }}
+  selector:
+    matchLabels:
+      {{- include "ap.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ap.selectorLabels" . | nindent 8 }}
+        {{- with $n.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with $n.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with $n.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $n.podSecurityContext | nindent 8 }}
+      containers:
+        - name: nginx
+          image: "{{ $n.image.repository }}:{{ $n.image.tag }}"
+          imagePullPolicy: {{ $n.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $n.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ $n.httpPort }}
+            {{- if $n.tls.enabled }}
+            - name: https
+              containerPort: 8443
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml $n.resources | nindent 12 }}
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: conf-d
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if $n.tls.enabled }}
+            - name: tls
+              mountPath: /etc/nginx/tls
+              readOnly: true
+            {{- end }}
+            {{- if .Values.artifactory.tls.caSecret }}
+            - name: upstream-ca
+              mountPath: /etc/nginx/upstream-ca
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: {{ include "ap.fullname" . }}-nginx
+        - name: conf-d
+          projected:
+            sources:
+              - configMap:
+                  name: {{ include "ap.fullname" . }}-nginx
+                  items:
+                    - key: default.conf
+                      path: default.conf
+              - configMap:
+                  name: {{ include "ap.fullname" . }}-mirrors
+        - name: tmp
+          emptyDir: {}
+        {{- if $n.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ include "ap.tlsSecret" . }}
+        {{- end }}
+        {{- if .Values.artifactory.tls.caSecret }}
+        - name: upstream-ca
+          secret:
+            secretName: {{ .Values.artifactory.tls.caSecret }}
+        {{- end }}
+      {{- with $n.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $n.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $n.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $n.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ap.fullname" . }}
+  labels:
+    {{- include "ap.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "ap.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    {{- if $n.tls.enabled }}
+    - name: https
+      port: 443
+      targetPort: https
+    {{- end }}
+{{- if and $n.podDisruptionBudget.enabled (gt (int $n.replicas) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ap.fullname" . }}
+  labels:
+    {{- include "ap.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ $n.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "ap.selectorLabels" . | nindent 6 }}
+{{- end }}
+{{- end }}

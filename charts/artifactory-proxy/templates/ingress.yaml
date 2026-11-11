@@ -1,0 +1,42 @@
+{{- if .Values.ingress.enabled }}
+{{- $i := .Values.ingress }}
+{{- $hosts := include "ap.hosts" . | fromJsonArray }}
+{{- $svc := include "ap.backendName" . }}
+{{- $port := include "ap.backendHttpPort" . | int }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ap.fullname" . }}
+  labels:
+    {{- include "ap.labels" . | nindent 4 }}
+    {{- with $i.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $i.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $i.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $i.tls }}
+  tls:
+    - secretName: {{ include "ap.tlsSecret" . }}
+      hosts:
+        {{- toYaml $hosts | nindent 8 }}
+  {{- end }}
+  rules:
+    {{- range $hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $svc }}
+                port:
+                  number: {{ $port }}
+    {{- end }}
+{{- end }}

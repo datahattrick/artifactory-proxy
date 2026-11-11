@@ -1,0 +1,9 @@
+apiVersion: v2
+name: artifactory-proxy
+description: >-
+  Unprivileged nginx that serves upstream registry hostnames (docker.io, quay.io, ...)
+  from JFrog Artifactory repositories, with matching OpenShift Routes or Ingresses.
+type: application
+version: 0.2.0
+appVersion: "1.29.8"
+keywords: [artifactory, jfrog, nginx, mirror, registry, openshift]

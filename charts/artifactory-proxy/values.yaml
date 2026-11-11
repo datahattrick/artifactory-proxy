@@ -1,0 +1,169 @@
+# -- Upstream Artifactory that every mirror is served from.
+artifactory:
+  # Base URL of Artifactory (router or JFrog nginx), no trailing slash.
+  # In-cluster example: http://jcr-artifactory.artifactory.svc:8082
+  # External example:   https://artifactory.local
+  url: http://artifactory.artifactory.svc:8082
+  # Host header sent upstream. Empty = host from `url`.
+  hostHeader: ""
+  # Only used for https upstreams.
+  tls:
+    verify: false
+    # Secret with a `ca.crt` key used to verify the upstream certificate.
+    caSecret: ""
+  # Upstream timeouts. Large image layers on a cold cache can take a while.
+  connectTimeout: 10s
+  readTimeout: 900s
+
+# -- Virtual hosts. Each entry becomes one nginx server block, one route/ingress
+# rule per host, and SANs on the generated certificate.
+#
+# type: docker   Docker registry v2 API mapped to /artifactory/api/docker/<repository>/v2/
+#                Auth realm and redirects are rewritten to the virtual host.
+# type: generic  Every path is prefixed with `pathPrefix` (e.g. /artifactory/api/pypi/pypi-remote).
+#                Empty pathPrefix = plain reverse proxy to Artifactory.
+#
+# extraConfig is appended inside the server block as raw nginx config.
+mirrors:
+  - name: dockerhub
+    type: docker
+    repository: docker.io
+    hosts:
+      - docker.io
+      - registry-1.docker.io
+      - index.docker.io
+  # - name: quay
+  #   type: docker
+  #   repository: quay.io
+  #   hosts: [quay.io]
+  # - name: ghcr
+  #   type: docker
+  #   repository: ghcr.io
+  #   hosts: [ghcr.io]
+  # - name: pypi
+  #   type: generic
+  #   pathPrefix: /artifactory/api/pypi/pypi-remote
+  #   hosts: [pypi.org]
+  # - name: artifactory
+  #   type: generic
+  #   hosts: [artifactory.local]
+
+# -- nginx deployment. Set enabled=false to reuse the JFrog chart's bundled nginx
+# instead (see README, "JFrog nginx mode"); the chart then only renders the
+# mirror ConfigMap, certificate and routes/ingresses.
+nginx:
+  enabled: true
+  replicas: 2
+  image:
+    repository: docker.io/nginxinc/nginx-unprivileged
+    tag: 1.29.8-alpine
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  # Container ports. Must be >1024 for non-root.
+  httpPort: 8080
+  # TLS listener, required for route termination passthrough/reencrypt.
+  tls:
+    enabled: false
+  workerConnections: 4096
+  # Log format: main | json
+  logFormat: main
+  # Raw config added to the http{} block.
+  extraHttpConfig: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  # No fixed runAsUser so OpenShift restricted-v2 can assign one.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+service:
+  type: ClusterIP
+  annotations: {}
+
+# Backend for route/ingress when nginx.enabled=false (JFrog nginx mode).
+externalService:
+  name: ""   # e.g. jcr-artifactory-nginx
+  port: 80
+
+# -- Certificate covering every mirror host. Your clients must trust its CA.
+tls:
+  # Secret holding tls.crt/tls.key. Default: <fullname>-tls
+  secretName: ""
+  certManager:
+    enabled: true
+    issuerRef:
+      kind: ClusterIssuer
+      name: ""
+    duration: 2160h
+    renewBefore: 360h
+  # Additional SANs.
+  extraDnsNames: []
+
+# =============================================================================
+# Exposure: how clients reach the mirror hostnames.
+#
+# Enable ONE of `route` or `ingress`; leave both disabled to create
+# only the Service. Every hostname in `mirrors[].hosts` gets a rule on the
+# enabled kind, and the TLS secret from `tls` is used wherever TLS ends.
+#
+#                       TLS ends at         Traffic to nginx   Needs nginx.tls
+#   route  edge         OpenShift router    HTTP  :80          no
+#   route  reencrypt    router, then nginx  HTTPS :443         yes
+#   route  passthrough  nginx               HTTPS :443         yes
+#   ingress             ingress controller  HTTP  :80          no
+# =============================================================================
+
+# -- OpenShift Routes (route.openshift.io/v1), one Route per hostname.
+route:
+  enabled: false
+  # edge | reencrypt | passthrough (see table above)
+  termination: edge
+  # Plain-HTTP requests: Redirect | None | Allow (Allow is invalid with passthrough).
+  insecureEdgeTerminationPolicy: Redirect
+  # Certificate the router presents (edge and reencrypt):
+  #   true:  the chart's TLS secret, via spec.tls.externalCertificate
+  #          (OpenShift 4.16+). Also creates a Role/RoleBinding so the router
+  #          service account below can read the secret.
+  #   false: the router's default wildcard certificate.
+  externalCertificate: true
+  routerServiceAccount:
+    name: router
+    namespace: openshift-ingress
+  # reencrypt only: PEM CA the router uses to verify nginx's certificate.
+  destinationCACertificate: ""
+  wildcardPolicy: None
+  annotations: {}
+  labels: {}
+
+# -- Kubernetes Ingress (networking.k8s.io/v1), one Ingress with a rule per hostname.
+# TLS ends at the ingress controller; nginx receives HTTP.
+ingress:
+  enabled: false
+  # IngressClass, e.g. traefik, nginx, openshift-default. Empty = cluster default.
+  className: ""
+  # Serve the chart's TLS secret. Set false if the controller provides the certificate.
+  tls: true
+  annotations: {}
+  labels: {}
+
+nameOverride: ""
+fullnameOverride: ""

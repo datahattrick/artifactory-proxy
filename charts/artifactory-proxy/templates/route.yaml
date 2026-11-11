@@ -1,0 +1,75 @@
+{{- if .Values.route.enabled }}
+{{- $r := .Values.route }}
+{{- $svc := include "ap.backendName" . }}
+{{- $secret := include "ap.tlsSecret" . }}
+{{- $useExt := and $r.externalCertificate (ne $r.termination "passthrough") }}
+{{- range $m := .Values.mirrors }}
+{{- range $host := $m.hosts }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ printf "%s-%s" (include "ap.fullname" $) ($host | replace "." "-") | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "ap.labels" $ | nindent 4 }}
+    artifactory-proxy/mirror: {{ $m.name }}
+    {{- with $r.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $r.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  host: {{ $host | quote }}
+  wildcardPolicy: {{ $r.wildcardPolicy }}
+  to:
+    kind: Service
+    name: {{ $svc }}
+    weight: 100
+  port:
+    targetPort: {{ ternary "http" "https" (eq $r.termination "edge") }}
+  tls:
+    termination: {{ $r.termination }}
+    insecureEdgeTerminationPolicy: {{ $r.insecureEdgeTerminationPolicy }}
+    {{- if $useExt }}
+    externalCertificate:
+      name: {{ $secret }}
+    {{- end }}
+    {{- with $r.destinationCACertificate }}
+    destinationCACertificate: |
+      {{- . | nindent 6 }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- if $useExt }}
+---
+# Lets the OpenShift router read the certificate secret (spec.tls.externalCertificate).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "ap.fullname" . }}-router-secret-reader
+  labels:
+    {{- include "ap.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $secret | quote }}]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "ap.fullname" . }}-router-secret-reader
+  labels:
+    {{- include "ap.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "ap.fullname" . }}-router-secret-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ $r.routerServiceAccount.name }}
+    namespace: {{ $r.routerServiceAccount.namespace }}
+{{- end }}
+{{- end }}

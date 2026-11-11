@@ -1,0 +1,27 @@
+artifactory-proxy serves these hosts from {{ .Values.artifactory.url }}:
+{{ range .Values.mirrors }}
+  {{ .name }} ({{ default "docker" .type }}{{ with .repository }} -> repo {{ . }}{{ end }}{{ with .pathPrefix }} -> {{ . }}{{ end }})
+{{- range .hosts }}
+    - {{ . }}
+{{- end }}
+{{- end }}
+
+Next steps:
+{{- if .Values.route.enabled }}
+  1. Point these names at the OpenShift router in internal DNS
+     (Routes: termination {{ .Values.route.termination }}).
+{{- else if .Values.ingress.enabled }}
+  1. Point these names at the ingress controller in internal DNS
+     (Ingress class: {{ default "cluster default" .Values.ingress.className }}).
+{{- else }}
+  1. route.enabled and ingress.enabled are both false: only Service
+     {{ include "ap.backendName" . }} exists. Expose it yourself and point these names at it.
+{{- end }}
+  2. Make clients trust the CA that signed secret {{ include "ap.tlsSecret" . }}.
+{{- if not .Values.nginx.enabled }}
+  3. JFrog nginx mode: mount ConfigMap {{ include "ap.fullname" . }}-mirrors at
+     /etc/nginx/mirrors.d in the JFrog nginx and restart it (see README).
+{{- end }}
+
+Test (Docker mirror):
+  curl -si https://{{ (first .Values.mirrors).hosts | first }}/v2/

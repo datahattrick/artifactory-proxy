@@ -1,0 +1,41 @@
+# artifactory-proxy values for JFrog nginx mode: no extra nginx Deployment.
+# The mirror server blocks are rendered into ConfigMap
+# "artifactory-mirrors-mirrors" and loaded by the JFrog chart's nginx
+# (see jfrog-nginx-mode.artifactory-values.yaml).
+# Install into the SAME namespace as the JFrog release.
+fullnameOverride: artifactory-mirrors
+
+# JFrog nginx proxies to the Artifactory router service directly.
+artifactory:
+  url: http://jcr-artifactory:8082   # <release>-artifactory service
+
+nginx:
+  enabled: false
+  httpPort: 8080                     # = JFrog nginx.http.internalPort
+
+# Routes/ingresses point at the JFrog nginx service.
+externalService:
+  name: jcr-artifactory-nginx        # <release>-artifactory-nginx
+  port: 80
+
+mirrors:
+  - name: dockerhub
+    type: docker
+    repository: docker.io
+    hosts: [docker.io, registry-1.docker.io, index.docker.io]
+
+tls:
+  certManager:
+    issuerRef:
+      kind: ClusterIssuer
+      name: grom-ca
+
+# OpenShift. JFrog nginx mode supports edge termination only.
+route:
+  enabled: true
+  termination: edge
+
+# Vanilla Kubernetes instead:
+# ingress:
+#   enabled: true
+#   className: traefik

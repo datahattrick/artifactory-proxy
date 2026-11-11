@@ -1,0 +1,20 @@
+# Merge into your jfrog/artifactory (or jfrog/artifactory-jcr: nest under
+# "artifactory:") values so the bundled nginx loads the mirror server blocks.
+nginx:
+  customVolumes: |
+    - name: artifactory-mirrors
+      configMap:
+        name: artifactory-mirrors-mirrors
+        optional: true
+  customVolumeMounts: |
+    - name: artifactory-mirrors
+      mountPath: /etc/nginx/mirrors.d
+      readOnly: true
+  customConfFile: |
+    mirrors.conf: |
+      include /etc/nginx/mirrors.d/*.conf;
+  # nginx does not reload on ConfigMap changes; bump this (or
+  # `kubectl rollout restart deploy/<release>-artifactory-nginx`) after
+  # changing mirrors.
+  annotations:
+    artifactory-mirrors/revision: "1"

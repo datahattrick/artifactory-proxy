@@ -1,0 +1,11 @@
+# Test install on k3s: Traefik ingress, cert from the grom-ca ClusterIssuer.
+artifactory:
+  url: http://jcr-artifactory.artifactory.svc:8082
+tls:
+  certManager:
+    issuerRef:
+      kind: ClusterIssuer
+      name: grom-ca
+ingress:
+  enabled: true
+  className: traefik

@@ -1,0 +1,28 @@
+{{- if .Values.tls.certManager.enabled }}
+{{- $hosts := concat (include "ap.hosts" . | fromJsonArray) .Values.tls.extraDnsNames }}
+{{- if and .Values.nginx.enabled .Values.nginx.tls.enabled }}
+{{- /* reencrypt: the router verifies nginx against the service name */}}
+{{- $svc := printf "%s.%s.svc" (include "ap.fullname" .) .Release.Namespace }}
+{{- $hosts = concat $hosts (list $svc (printf "%s.cluster.local" $svc)) }}
+{{- end }}
+{{- $hosts = $hosts | uniq }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "ap.fullname" . }}
+  labels:
+    {{- include "ap.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "ap.tlsSecret" . }}
+  commonName: {{ first $hosts }}
+  dnsNames:
+    {{- toYaml $hosts | nindent 4 }}
+  duration: {{ .Values.tls.certManager.duration }}
+  renewBefore: {{ .Values.tls.certManager.renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    {{- toYaml .Values.tls.certManager.issuerRef | nindent 4 }}
+{{- end }}
